@@ -1,31 +1,30 @@
-use libc::{ioctl, STDOUT_FILENO, TIOCGWINSZ};
 use std::io::{stdin, stdout, Write};
 
-#[derive(Debug)]
-#[repr(C)]
-pub struct WindowSize {
-    pub rows: u16,
-    pub columns: u16,
-    pub width: u16,
-    pub height: u16,
-}
+// #[derive(Debug)]
+// #[repr(C)]
+// pub struct WindowSize {
+//     pub rows: u16,
+//     pub columns: u16,
+//     pub width: u16,
+//     pub height: u16,
+// }
 
-impl WindowSize {
-    pub fn new() -> WindowSize {
-        WindowSize {
-            rows: 0,
-            columns: 0,
-            width: 0,
-            height: 0,
-        }
-    }
+// impl WindowSize {
+//     pub fn new() -> WindowSize {
+//         WindowSize {
+//             rows: 0,
+//             columns: 0,
+//             width: 0,
+//             height: 0,
+//         }
+//     }
 
-    pub fn update(&mut self) {
-        unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, self) };
-    }
-}
+//     pub fn update(&mut self) {
+//         unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, self) };
+//     }
+// }
 
-pub fn get_input_line(prompt: String) -> String {
+pub fn read_line(prompt: String) -> String {
     print!("{prompt}");
     stdout().flush().unwrap();
     let mut result: String = String::new();
@@ -38,16 +37,16 @@ pub fn get_input_line(prompt: String) -> String {
     if let Some('\r') = result.chars().next_back() {
         result.pop();
     }
-    return result;
+    result
 }
 
-pub fn hide_cursor() {
-    print!("\x1b[?25l\0");
-}
+// pub fn hide_cursor() {
+//     print!("\x1b[?25l\0");
+// }
 
-pub fn show_cursor() {
-    print!("\x1b[?25h\0")
-}
+// pub fn show_cursor() {
+//     print!("\x1b[?25h\0")
+// }
 
 // pub struct ProgressBar {
 //     items: usize,
