@@ -1,417 +1,276 @@
-mod boards;
-mod display;
-mod tree;
-
-use display::clear_screen;
-use display::read_line;
-use std::env;
-use std::fmt::Display;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use tree::Node;
 
 #[derive(Debug)]
-struct Tile {
-    letter: Option<char>,
-    cross_check_set: Vec<char>,
+struct LetterSet(u32);
+
+impl LetterSet {
+    fn new() -> LetterSet {
+        LetterSet(0b11111111111111111111111111)
+    }
 }
 
-impl Tile {
-    fn new(letter: Option<char>) -> Tile {
-        Tile {
-            letter: None,
-            cross_check_set: Vec::new(),
+impl LetterSet {
+    fn remove_letter(&mut self, letter: char) {
+        if self.has_letter(letter) {
+            let letter_set = LetterSet::from(letter);
+            self.0 &= !letter_set.0;
         }
     }
-}
 
-#[derive(Debug)]
-struct Board {
-    rows: [[Tile]],
-}
-
-impl Board {
-    fn new(board: [[Tile]]) -> Board {
-        Board { rows: board }
+    fn has_letter(&self, letter: char) -> bool {
+        self.0 & LetterSet::from(letter).0 != 0
     }
-}
 
-impl Display for Board {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut result = String::new();
-        result += &"━".repeat(61);
-        result += "\n";
-        for row in self.rows.iter() {
-            result += "┃";
-            for tile in row.iter() {
-                result += match tile.tile_type {
-                    TileType::Normal => " ",
-                    TileType::DoubleCharacter => "\x1b[46m ",
-                    TileType::TripleCharacter => "\x1b[44m ",
-                    TileType::DoubleWord => "\x1b[45m ",
-                    TileType::TripleWord => "\x1b[41m ",
-                };
-                result.push(tile.letter.unwrap_or(' '));
-                result += " \x1b[0m┃"
-            }
-            result += "\n";
-            result += &"━".repeat(61);
-            result += "\n";
-        }
-        write!(f, "{result}")
-    }
-}
-
-fn load_dictionary() -> Node {
-    let file: File = File::open(&"src/dictionaries/ods8.txt").expect("Couldn't open the file.");
-    let reader: BufReader<File> = BufReader::new(file);
-    let mut tree: Node = Node::new(false);
-    for line in reader.lines() {
-        let line = line.unwrap();
-        let mut last_node: &mut Node = &mut tree;
-        for (index, character) in line.chars().enumerate() {
-            if !last_node.contains_edge(&character) {
-                last_node.insert_edge(
-                    character,
-                    Node::new(match line.len() - index {
-                        1 => true,
-                        _ => false,
-                    }),
-                )
-            }
-            last_node = last_node.get_node_mut(&character).unwrap();
-        }
-    }
-    tree
-}
-
-fn left_part(
-    partial_word: &mut String,
-    node: &Node,
-    rack: &mut Vec<char>,
-    mut limit: isize,
-    results: &mut Vec<String>,
-) {
-    extend_right(partial_word, node, rack, results);
-    if limit > 0 {
-        for letter in node.edges.keys() {
-            if rack.contains(letter) {
-                rack.remove(
-                    rack.iter()
-                        .position(|rack_letter| rack_letter == letter)
-                        .unwrap(),
-                );
-                let node = node.get_node(letter).unwrap();
-                partial_word.push(letter.clone());
-
-                limit -= 1;
-                left_part(partial_word, node, rack, limit, results);
-                partial_word.pop();
-                rack.push(letter.clone());
+    fn get_letters(&self) -> Vec<char> {
+        let mut letters = Vec::new();
+        for i in 0..26 {
+            if self.0 & (1 << i) != 0 {
+                letters.push((b'A' + i) as char);
             }
         }
+        letters
     }
 }
 
-fn extend_right(
-    partial_word: &mut String,
-    node: &Node,
-    rack: &mut Vec<char>,
-    results: &mut Vec<String>,
-) {
-    if node.is_terminal {
-        results.push(partial_word.clone());
-    }
-    for letter in node.edges.keys() {
-        if rack.contains(letter) {
-            rack.remove(
-                rack.iter()
-                    .position(|rack_letter| rack_letter == letter)
-                    .unwrap(),
-            );
-            let node = node.get_node(letter).unwrap();
-            partial_word.push(letter.clone().to_ascii_lowercase());
-            extend_right(partial_word, node, rack, results);
-            partial_word.pop();
-            rack.push(letter.clone());
+impl From<char> for LetterSet {
+    fn from(value: char) -> Self {
+        let value = value.to_ascii_uppercase();
+        if ('A'..='Z').contains(&value) {
+            LetterSet(1 << (value as u32 - 'A' as u32))
+        } else {
+            LetterSet(0)
         }
+    }
+}
+
+impl Clone for LetterSet {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl Copy for LetterSet {}
+
+struct Game {
+    dictionary: Node,
+    primary_board: [[char; 15]; 15],
+    secondary_board: [[char; 15]; 15],
+    primary_cross_check_set: [[LetterSet; 15]; 15],
+    secondary_cross_check_set: [[LetterSet; 15]; 15],
+}
+
+impl Game {
+    fn new() -> Game {
+        let file: File = match File::open(&"src/dictionaries/ods8.txt") {
+            Ok(result) => result,
+            Err(_) => panic!("The file couldn't be read")
+        };
+        let reader: BufReader<File> = BufReader::new(file);
+        let mut tree: Node = Node::new(false);
+        for line in reader.lines() {
+            let line = line.unwrap();
+            let mut last_node: &mut Node = &mut tree;
+            for (index, character) in line.chars().enumerate() {
+                if !last_node.contains_edge(&character) {
+                    last_node.insert_edge(
+                        character,
+                        Node::new(match line.len() - index {
+                            1 => true,
+                            _ => false,
+                        }),
+                    )
+                }
+                last_node = last_node.get_node_mut(&character).unwrap();
+            }
+        }
+
+        Game { dictionary: tree, primary_board: [[' '; 15]; 15], secondary_board: [[' '; 15]; 15], primary_cross_check_set: [[LetterSet::new(); 15]; 15], secondary_cross_check_set: [[LetterSet::new(); 15]; 15] }
+    }
+}
+
+impl Game {
+    fn play(&mut self, word: String, across: bool, row: usize, column: usize) {
+        if across {
+            for (index, letter) in word.chars().enumerate() {
+                self.primary_board[row][column + index] = letter;
+                self.secondary_board[14 - column - index][row] = letter;
+            }
+        } else {
+            for (index, letter) in word.chars().enumerate() {
+                self.primary_board[row + index][column] = letter;
+                self.secondary_board[14 - column][row + index] = letter;
+            }
+        }
+    
+        self.update_cross_check_sets();
+    }
+
+    fn update_cross_check_sets(&mut self) {
+        self.primary_cross_check_set = [[LetterSet::new(); 15]; 15];
+        self.secondary_cross_check_set = [[LetterSet::new(); 15]; 15];
+        let mut columns = [[' '; 15]; 15];
+        for (row_index, row) in self.primary_board.iter().enumerate() {
+            for (column_index, current_letter) in row.iter().enumerate() {
+                columns[column_index][row_index] = current_letter.clone();
+            }
+        }
+        for column in columns.iter() {
+            let mut start_index = 0;
+            while start_index < 15 {
+                let mut next_line_start_index = 15;
+                while start_index < 15 && column[start_index] == ' ' {
+                    start_index += 1;
+                }
+                if start_index >= 15 {
+                    break;
+                }
+                let mut end_index = start_index;
+                while end_index < 15 && column[end_index] != ' ' {
+                    end_index += 1;
+                }
+                if end_index < 14 && column[end_index + 1] != ' ' {
+                    end_index += 1;
+                    next_line_start_index = end_index;
+                    while end_index < 15 && column[end_index] != ' ' {
+                        end_index += 1;
+                    }
+                } else {
+                    next_line_start_index = end_index + 1;
+                }
+                if end_index < 15 && column[end_index] == ' ' {
+                    let mut current_word: Vec<char> = Vec::new();
+                    current_word.append(&mut column[start_index..end_index].iter().map(|letter| letter.clone()).collect());
+                    println!("{current_word:?}")
+                }
+                start_index = next_line_start_index;
+            }
+        }
+        // columns = [[' '; 15]; 15];
+        // for (row_index, row) in self.secondary_board.iter().enumerate() {
+        //     for (column_index, current_letter) in row.iter().enumerate() {
+        //         columns[column_index][14 - row_index] = current_letter.clone();
+        //     }
+        // }
+        // println!("{:?}", columns);
+        // for (column_index, column) in columns.iter().enumerate() {
+        //     let mut current_word: Vec<char> = Vec::new();
+        //     let mut start_index: usize = 0;
+        //     for (row_index, current_letter) in column.iter().enumerate() {
+        //         if current_letter.clone() == ' ' || row_index == 14 {
+        //             if !current_word.is_empty() {
+        //                 if start_index != 0 {
+        //                     start_index -= 1;
+        //                     println!("{:?}, {}, {}, {}", current_word, column_index, start_index, row_index);
+        //                     'tree: for letter in self.secondary_cross_check_set[start_index][column_index].get_letters().iter() {
+        //                         let mut node = &self.dictionary.edges[letter];
+        //                         for word_letter in current_word.iter() {
+        //                             if node.contains_edge(word_letter) {
+        //                                 node = node.get_node(word_letter).unwrap();
+        //                             } else {
+        //                                 self.secondary_cross_check_set[14 - start_index][column_index].remove_letter(letter.clone());
+        //                                 continue 'tree;
+        //                             }
+        //                         }
+        //                         if !node.is_terminal {
+        //                             self.secondary_cross_check_set[14 -     start_index][column_index].remove_letter(letter.clone());
+        //                         }
+        //                     }
+        //                 }
+        //                 if row_index != 14 {
+        //                     println!("{:?}, {}, {}, {}", current_word, column_index, start_index, row_index);
+        //                     let mut node = &self.dictionary;
+        //                     for word_letter in current_word.iter() {
+        //                         node = node.get_node(word_letter).unwrap();
+        //                     }
+        //                     for letter in self.secondary_cross_check_set[14 - row_index][column_index].get_letters().iter() {
+        //                         if node.contains_edge(letter) {
+        //                             if node.get_node(letter).unwrap().is_terminal {
+        //                                 continue;
+        //                             }
+        //                         }
+        //                         self.secondary_cross_check_set[14 - row_index][column_index].remove_letter(letter.clone());
+        //                     }
+                            
+        //                 }
+        //                 current_word = Vec::new();
+        //             }
+        //         } else {
+        //             if current_word.is_empty() {
+        //                 start_index = row_index;
+        //             }
+        //             current_word.push(current_letter.clone());
+        //         }
+        //     }
+        // }
+
+    }
+}
+
+struct Node {
+    edges: HashMap<char, Node>,
+    is_terminal: bool,
+}
+
+impl Node {
+    fn new(is_terminal: bool) -> Node {
+        Node {
+            edges: HashMap::new(),
+            is_terminal,
+        }
+    }
+
+    fn contains_edge(&self, letter: &char) -> bool {
+        self.edges.contains_key(letter)
+    }
+
+    fn insert_edge(&mut self, letter: char, target: Node) {
+        self.edges.insert(letter, target);
+    }
+
+    fn get_node(&self, letter: &char) -> Option<&Node> {
+        self.edges.get(letter)
+    }
+
+    fn get_node_mut(&mut self, letter: &char) -> Option<&mut Node> {
+        self.edges.get_mut(letter)
     }
 }
 
 fn main() {
-    env::set_var("RUST_BACKTRACE", "1");
+    let mut game = Game::new();
 
-    clear_screen();
+    game.play(String::from("AGIREZ"), true, 7, 6);
+    game.play(String::from("BOUGER"), false, 4, 7);
+    game.play(String::from("BARRIERE"), true, 4, 7);
+    game.play(String::from("CRI"), false, 3, 10);
+    game.play(String::from("DIABOLOS"), true, 5, 1);
+    game.play(String::from("REQUIN"), true, 9, 7);
 
-    let tree = load_dictionary();
-    let board = Board::new([
-        [
-            Tile::new(TileType::TripleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleWord),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::TripleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleWord),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleWord),
-            Tile::new(TileType::Normal),
-        ],
-        [
-            Tile::new(TileType::TripleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleWord),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::DoubleCharacter),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::Normal),
-            Tile::new(TileType::TripleWord),
-        ],
-    ]);
 
-    clear_screen();
 
-    println!("{:#?}", board.rows[6..9]);
 
-    loop {
-        let word = read_line(format!("What are the letters in your rack: "));
-        let mut rack = word.chars().collect::<Vec<char>>();
-        let mut partial_word = String::new();
-        let mut results: Vec<String> = Vec::new();
-        left_part(&mut partial_word, &tree, &mut rack, 7, &mut results);
-        println!("{results:?}");
+    println!("{:?}", game.primary_board);
+    println!("{:?}", game.secondary_board);
+    for (row_index, row) in game.primary_cross_check_set.iter().enumerate() {
+        for (column_index, column) in row.iter().enumerate() {
+            if column.0 != (1 << 26) - 1 {
+                println!("---------------------------------------------");
+                println!("Column: {}", column_index + 1);
+                println!("Row: {}", row_index + 1);
+                println!("Letters: {:?}", column.get_letters());
+            }
+        }
+    }
+    for (row_index, row) in game.secondary_cross_check_set.iter().enumerate() {
+        for (column_index, column) in row.iter().enumerate() {
+            if column.0 != (1 << 26) - 1 {
+                println!("---------------------------------------------");
+                println!("Column: {}",  column_index + 1);
+                println!("Row: {}", row_index + 1);
+                println!("Letters: {:?}", column.get_letters());
+            }
+        }
     }
 }
