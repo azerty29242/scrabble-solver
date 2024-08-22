@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{self, HashMap};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 
@@ -119,32 +119,35 @@ impl Game {
         for column in columns.iter() {
             let mut start_index = 0;
             while start_index < 15 {
-                let mut next_line_start_index = 15;
-                while start_index < 15 && column[start_index] == ' ' {
-                    start_index += 1;
-                }
-                if start_index >= 15 {
-                    break;
-                }
-                let mut end_index = start_index;
-                while end_index < 15 && column[end_index] != ' ' {
-                    end_index += 1;
-                }
-                if end_index < 14 && column[end_index + 1] != ' ' {
-                    end_index += 1;
-                    next_line_start_index = end_index;
+                if column[start_index] == ' ' {
+                    while start_index < 14 && column[start_index + 1] == ' ' {
+                        start_index += 1;
+                    }
+                    if start_index >= 14 && column[start_index] == ' ' {
+                        break;
+                    }
+                    let mut end_index = start_index + 1;
                     while end_index < 15 && column[end_index] != ' ' {
                         end_index += 1;
                     }
+                    println!("{:?}", column[start_index..end_index].iter().collect::<Vec<&char>>());
+                    start_index += 1;
                 } else {
-                    next_line_start_index = end_index + 1;
+                    let mut space_index = start_index;
+                    let mut end_index = start_index;
+                    while space_index < 15 && column[space_index] != ' ' {
+                        space_index += 1;
+                        end_index += 1;
+                    }
+                    end_index += 1;
+                    while end_index < 15 && column[end_index] != ' ' {
+                        end_index += 1;
+                    }
+                    if !end_index >= 15 {
+                        println!("{:?}", column[start_index..end_index].iter().collect::<Vec<&char>>());
+                    }
+                    start_index = space_index + 1;
                 }
-                if end_index < 15 && column[end_index] == ' ' {
-                    let mut current_word: Vec<char> = Vec::new();
-                    current_word.append(&mut column[start_index..end_index].iter().map(|letter| letter.clone()).collect());
-                    println!("{current_word:?}")
-                }
-                start_index = next_line_start_index;
             }
         }
         // columns = [[' '; 15]; 15];
@@ -247,6 +250,8 @@ fn main() {
     game.play(String::from("CRI"), false, 3, 10);
     game.play(String::from("DIABOLOS"), true, 5, 1);
     game.play(String::from("REQUIN"), true, 9, 7);
+    game.play(String::from("QUARTS"), false, 9, 9);
+
 
 
 
