@@ -1,38 +1,40 @@
-use std::{collections::HashMap, fmt::Display, fs::File, io::{BufRead, BufReader}};
+use std::{
+    collections::HashMap,
+    fmt::Display,
+    fs::File,
+    io::{BufRead, BufReader},
+};
 
 type Letter = u8;
 
 pub struct Board {
     primary: [[Letter; 15]; 15],
-    secondary: [[Letter; 15]; 15]
+    secondary: [[Letter; 15]; 15],
 }
 
 impl Board {
     pub fn new() -> Board {
-        Board { primary: [[0; 15]; 15], secondary: [[0; 15]; 15] }
+        Board {
+            primary: [[0; 15]; 15],
+            secondary: [[0; 15]; 15],
+        }
     }
-    
+
     pub fn get(&self, row_index: usize, column_index: usize) -> Letter {
         self.primary[row_index][column_index]
     }
 
     pub fn rotate(&mut self) {
-        let mut primary_board = [[0; 15]; 15];
-        let mut secondary_board = [[0; 15]; 15];
-        for row_index in 0..15 {
-            for column_index in 0..15 {
-                secondary_board[column_index][row_index] = self.primary[row_index][column_index];
-                primary_board[column_index][row_index] = self.secondary[row_index][column_index];
-            }
-        }
-        self.primary = primary_board;
-        self.secondary = secondary_board;
+        (self.primary, self.secondary) = (self.secondary, self.primary);
     }
 }
 
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐")?;
+        writeln!(
+            f,
+            "┌───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┬───┐"
+        )?;
         for (row_index, row) in self.primary.iter().enumerate() {
             write!(f, "│")?;
             for &cell in row.iter() {
@@ -41,9 +43,15 @@ impl Display for Board {
             writeln!(f)?;
 
             if row_index < 14 {
-                writeln!(f, "├───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┤")?;
+                writeln!(
+                    f,
+                    "├───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┼───┤"
+                )?;
             } else {
-                writeln!(f, "└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘")?;
+                writeln!(
+                    f,
+                    "└───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┴───┘"
+                )?;
             }
         }
         Ok(())
@@ -63,7 +71,8 @@ impl ToChar for Letter {
                 "Invalid letter value: {self}. Expected a value between 0 and 26. \
                 Only 26 letters (A-Z) and the space character are supported."
             )),
-        }.unwrap()
+        }
+        .unwrap()
     }
 }
 
@@ -86,40 +95,54 @@ impl FromChar for Letter {
 #[derive(Debug)]
 struct Node {
     is_terminal: bool,
-    children: HashMap<Letter, Node>
+    children: HashMap<Letter, Node>,
 }
 
 impl Node {
     fn new(is_terminal: bool) -> Node {
-        Node { is_terminal, children: HashMap::new() }
+        Node {
+            is_terminal,
+            children: HashMap::new(),
+        }
     }
 
-    fn get_node(&self, partial_word: String) -> Option<&Node> {
+    fn get_node(&self, partial_word: &str) -> Option<&Node> {
         let mut current_node = self;
         for letter in partial_word.chars() {
-            if current_node.children.contains_key(&Letter::from_char(letter)) {
-                current_node = current_node.children.get(&Letter::from_char(letter)).unwrap();
+            if current_node
+                .children
+                .contains_key(&Letter::from_char(letter))
+            {
+                current_node = current_node
+                    .children
+                    .get(&Letter::from_char(letter))
+                    .unwrap();
             } else {
                 return None;
             }
-        };
+        }
         Some(current_node)
     }
 }
 
 #[derive(Debug)]
 struct Lexicon {
-    root: Node
+    root: Node,
 }
 
 impl Lexicon {
     fn new() -> Lexicon {
-        Lexicon { root: Node::new(false) }
+        Lexicon {
+            root: Node::new(false),
+        }
     }
 
     pub fn from_file(path: &str) -> Self {
         let file = File::open(path).unwrap_or_else(|_| {
-            panic!("Failed to open the lexicon file at '{}'. Ensure the file exists and is readable.", path);
+            panic!(
+                "Failed to open the lexicon file at '{}'. Ensure the file exists and is readable.",
+                path
+            );
         });
 
         let reader = BufReader::new(file);
@@ -144,14 +167,51 @@ impl Lexicon {
     }
 }
 
+struct Coordinates {
+    row_index: usize,
+    column_index: usize,
+}
+
+impl Coordinates {
+    fn new() -> Coordinates {
+        Coordinates {
+            row_index: 0,
+            column_index: 0,
+        }
+    }
+}
+
+struct PartialWord {
+    start: Coordinates,
+    string: String,
+}
+
+impl PartialWord {
+    fn new() -> PartialWord {
+        PartialWord {
+            string: String::new(),
+            start: Coordinates::new(),
+        }
+    }
+}
+
 struct Game {
     board: Board,
-    lexicon: Lexicon
+    lexicon: Lexicon,
+    cross_check_sets: [[u32; 15]; 15],
+    anchors: [u16; 15],
+    rack: HashMap<Letter, usize>,
 }
 
 impl Game {
     fn new() -> Game {
-        Game { board: Board::new(), lexicon: Lexicon::from_file("src/dictionaries/ods8.txt") }
+        Game {
+            board: Board::new(),
+            lexicon: Lexicon::from_file("src/dictionaries/ods8.txt"),
+            cross_check_sets: [[67108863; 15]; 15],
+            anchors: [0; 15],
+            rack: HashMap::new(),
+        }
     }
 
     fn letter_set(&self, column_index: usize, row_index: usize) -> u32 {
@@ -177,29 +237,30 @@ impl Game {
                 break;
             }
         }
-        if let Some(node) = self.lexicon.root.get_node(before_anchor) {
+        if let Some(node) = self.lexicon.root.get_node(&before_anchor) {
             for (edge, current_node) in node.children.iter() {
-                if let Some(final_node) = current_node.get_node(after_anchor.clone()) {
+                if let Some(final_node) = current_node.get_node(&after_anchor) {
                     if final_node.is_terminal {
                         letter_set |= 1 << edge - 1;
                     }
                 }
             }
         }
+
         letter_set
     }
 
-    fn cross_check_sets(&self) -> [[u32; 15]; 15] {
-        let mut cross_check_sets = [[0; 15]; 15];
-    
+    fn calculate_anchors(&mut self) {
+        self.anchors = [0; 15];
+
         for (row_index, row) in self.board.primary.iter().enumerate() {
             for (column_index, column) in row.iter().enumerate() {
                 if column != &0 {
                     if column_index > 0 && row[column_index - 1] == 0 {
-                        cross_check_sets[row_index][column_index - 1] = 67108863
+                        self.anchors[row_index] |= 1 << column_index - 1;
                     }
                     if column_index < 14 && row[column_index + 1] == 0 {
-                        cross_check_sets[row_index][column_index + 1] = 67108863;
+                        self.anchors[row_index] |= 1 << column_index + 1;
                     }
                 }
             }
@@ -209,162 +270,121 @@ impl Game {
             for (row_index, row) in column.iter().enumerate() {
                 if row != &0 {
                     if row_index > 0 && column[row_index - 1] == 0 {
-                        cross_check_sets[row_index - 1][column_index] = self.letter_set(column_index, row_index - 1);
+                        self.anchors[row_index - 1] |= 1 << column_index;
                     }
-                    if row_index < 14 && self.board.secondary[column_index][row_index + 1] == 0 {
-                        cross_check_sets[row_index - 1][column_index] = self.letter_set(column_index, row_index - 1);
+                    if row_index < 14 && column[row_index + 1] == 0 {
+                        self.anchors[row_index + 1] |= 1 << column_index;
                     }
                 }
             }
         }
-
-        cross_check_sets
     }
 
-    fn extend_right(
-        &self,
-        partial_word: &mut String,
-        node: &Node,
-        cross_check_sets: [u32; 15],
-        row_index: usize,
-        column_index: usize,
-        start_row_index: usize,
-        start_column_index: usize,
-    ) {
-        if column_index < 15 {
-            if self.board.get(row_index, column_index) == 0 {
-                if node.is_terminal {
+    fn calculate_cross_check_sets(&mut self) {
+        self.cross_check_sets = [[67108863; 15]; 15];
+
+        for (column_index, column) in self.board.secondary.iter().enumerate() {
+            for (row_index, row) in column.iter().enumerate() {
+                if row != &0 {
+                    if row_index > 0 && column[row_index - 1] == 0 {
+                        self.cross_check_sets[row_index - 1][column_index] =
+                            self.letter_set(column_index, row_index - 1);
+                    }
+                    if row_index < 14 && column[row_index + 1] == 0 {
+                        self.cross_check_sets[row_index + 1][column_index] =
+                            self.letter_set(column_index, row_index + 1);
+                    }
+                }
+            }
+        }
+    }
+
+    fn extend_right(&self, partial_word: &mut PartialWord, node: &Node, possible: bool) {
+        let current_row_index = partial_word.start.row_index;
+        let current_column_index = partial_word.start.column_index + partial_word.string.len();
+        if current_column_index >= 15 {
+            if node.is_terminal {
+                println!(
+                    "Word: {}, row: {}, column: {}",
+                    partial_word.string,
+                    partial_word.start.row_index,
+                    partial_word.start.column_index
+                );
+                return;
+            }
+        } else {
+            let letter = self.board.get(current_row_index, current_column_index);
+            if self.board.get(current_row_index, current_column_index) == 0 {
+                if node.is_terminal && possible {
                     println!(
-                        "Word: {partial_word}, Start: ({}, {})",
-                        start_row_index, start_column_index
+                        "Word: {}, row: {}, column: {}",
+                        partial_word.string,
+                        partial_word.start.row_index,
+                        partial_word.start.column_index
                     );
                 }
-                for (edge, current_node) in node.children.iter() {
-                    if (cross_check_sets[column_index] & (1 << edge - 1)) != 0 {
-                        partial_word.push((*edge as Letter).to_char());
-                        self.extend_right(
-                            partial_word,
-                            current_node,
-                            cross_check_sets,
-                            row_index,
-                            column_index + 1,
-                            start_row_index,
-                            start_column_index,
-                        );
-                        partial_word.pop();
+                for (letter, current_node) in node.children.iter() {
+                    if (self.cross_check_sets[current_row_index][current_column_index]
+                        & (1 << *letter - 1))
+                        != 0
+                    {
+                        partial_word.string.push((*letter as Letter).to_char());
+                        self.extend_right(partial_word, current_node, true);
+                        partial_word.string.pop();
                     }
                 }
             } else {
-                let letter = self.board.get(row_index, column_index);
-                if node.children.contains_key(&letter)
-                    && (cross_check_sets[column_index] & (1 << letter - 1)) != 0
-                {
-                    partial_word.push((letter as Letter).to_char());
-                    self.extend_right(
-                        partial_word,
-                        node.children.get(&letter).unwrap(),
-                        cross_check_sets,
-                        row_index,
-                        column_index + 1,
-                        start_row_index,
-                        start_column_index,
-                    );
-                    partial_word.pop();
+                if let Some(node) = node.children.get(&letter) {
+                    partial_word.string.push((letter as Letter).to_char());
+                    self.extend_right(partial_word, node, true);
+                    partial_word.string.pop();
                 }
-            }
-        } else {
-            if node.is_terminal {
-                println!(
-                    "Word: {partial_word}, Start: ({}, {})",
-                    start_row_index, start_column_index
-                );
             }
         }
     }
-    
-    fn left_part(
-        &self,
-        partial_word: &str,
-        node: &Node,
-        cross_check_sets: [u32; 15],
-        limit: u8,
-        anchor_row_index: usize,
-        anchor_column_index: usize,
-        column_index: &mut usize,
-        start_row_index: usize,
-        start_column_index: usize,
-    ) {
-        self.extend_right(
-            &mut partial_word.to_owned(),
-            node,
-            cross_check_sets,
-            anchor_row_index,
-            anchor_column_index,
-            start_row_index,
-            start_column_index,
-        );
-        if limit > 0 {
-            for (edge, current_node) in node.children.iter() {
-                if (cross_check_sets[*column_index] & (1 << edge - 1)) != 0 {
-                    let mut partial_word = partial_word.to_owned();
-                    partial_word.push((*edge as Letter).to_char());
-                    *column_index -= 1;
-                    self.left_part(
-                        &partial_word,
-                        current_node,
-                        cross_check_sets,
-                        limit - 1,
-                        anchor_row_index,
-                        anchor_column_index,
-                        column_index,
-                        start_row_index,
-                        start_column_index,
-                    );
-                }
-            }
-        }
-    }    
 
-    fn solutions(&self) {
-        let cross_check_sets = self.cross_check_sets();
+    fn left_part(&self, partial_word: &mut PartialWord, node: &Node, limit: u8) {
+        self.extend_right(partial_word, node, false);
+        if limit > 0 {
+            partial_word.start.column_index -= 1;
+            for (letter, current_node) in node.children.iter() {
+                partial_word.string.push((*letter as Letter).to_char());
+                self.left_part(partial_word, current_node, limit - 1);
+                partial_word.string.pop();
+            }
+            partial_word.start.column_index += 1;
+        }
+    }
+
+    fn solutions(&mut self) {
+        self.calculate_anchors();
+        self.calculate_cross_check_sets();
         for (row_index, row) in self.board.primary.iter().enumerate() {
             let mut non_anchor_square_count: u8 = 0;
-            let mut partial_word = String::new();
+            let mut partial_word = PartialWord::new();
             for (column_index, column) in row.iter().enumerate() {
                 let letter = (*column as Letter).to_char();
-                match cross_check_sets[row_index][column_index] != 0 {
+                match (self.anchors[row_index] & (1 << column_index)) != 0 {
                     false => {
                         if self.board.get(row_index, column_index) != 0 {
-                            partial_word.push(letter)
+                            partial_word.string.push(letter);
                         }
                         non_anchor_square_count += 1
-                    },
+                    }
                     true => {
-                        if !partial_word.is_empty() {
-                            let current_node = self.lexicon.root.get_node(partial_word.clone());
-                            if let Some(current_node) = &current_node {
-                                self.extend_right(
-                                    &mut partial_word.clone(),
-                                    current_node,
-                                    cross_check_sets[row_index],
-                                    row_index,
-                                    column_index,
-                                    row_index,
-                                    column_index - partial_word.len(),
-                                );
+                        partial_word.start.row_index = row_index;
+                        partial_word.start.column_index = column_index - partial_word.string.len();
+                        if !partial_word.string.is_empty() {
+                            let current_node = self.lexicon.root.get_node(&partial_word.string);
+                            if let Some(current_node) = current_node {
+                                self.extend_right(&mut partial_word, current_node, false);
                             }
-                            partial_word.clear();
+                            partial_word.string.clear();
                         } else {
                             self.left_part(
-                                "",
+                                &mut partial_word,
                                 &self.lexicon.root,
-                                cross_check_sets[row_index],
                                 non_anchor_square_count,
-                                row_index,
-                                column_index.clone(),
-                                &mut column_index.clone(),
-                                row_index,
-                                column_index, // Use current column as starting column
                             );
                         }
                         non_anchor_square_count = 0
@@ -390,7 +410,7 @@ impl Game {
 }
 
 fn main() -> Result<(), String> {
-    let mut game = Game::new();
+    let mut game: Game = Game::new();
     game.play("CAFES", 7, 6, true);
     game.play("KIF", 5, 8, false);
     game.play("HI", 6, 7, true);
@@ -411,7 +431,15 @@ fn main() -> Result<(), String> {
     game.play("SOIF", 14, 6, true);
     game.play("LIMITONS", 11, 3, true);
     game.play("ZEN", 9, 9, false);
-
+    /*
+        game.rack.insert(2, 1);
+        game.rack.insert(3, 1);
+        game.rack.insert(7, 1);
+        game.rack.insert(8, 1);
+        game.rack.insert(9, 1);
+        game.rack.insert(14, 1);
+        game.rack.insert(21, 1);
+    */
     game.solutions();
 
     Ok(())
