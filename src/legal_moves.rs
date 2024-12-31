@@ -1,7 +1,7 @@
 use crate::board::Board;
 use crate::letter::{Letter, ToChar};
 use crate::lexicon::{Lexicon, Node};
-use crate::score::calculate_score;
+use crate::score::{calculate_score, word_value};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
@@ -16,12 +16,17 @@ pub struct LegalMove {
 impl LegalMove {
     fn new(
         board: &Board,
-        row_index: usize,
-        column_index: usize,
+        value_set: &[[u16; 15]; 15],
+        mut row_index: usize,
+        mut column_index: usize,
         across: bool,
         letters: String,
+        bingo: bool,
     ) -> Self {
-        let score = calculate_score(board, &letters);
+        let score = calculate_score(board, value_set, &letters, row_index, column_index, bingo);
+        if !board.across {
+            (row_index, column_index) = (column_index, row_index);
+        }
         Self {
             row_index,
             column_index,
@@ -41,7 +46,7 @@ fn remove_letter_from_rack(rack: &mut HashMap<Letter, u8>, letter: Letter) {
     }
 }
 
-fn add_letter_to_rack(rack: &mut HashMap<Letter, u8>, letter: Letter) {
+pub fn add_letter_to_rack(rack: &mut HashMap<Letter, u8>, letter: Letter) {
     match rack.entry(letter) {
         Entry::Occupied(mut entry) => *entry.get_mut() += 1,
         Entry::Vacant(entry) => {
@@ -79,28 +84,40 @@ fn calculate_anchors(board: &Board) -> [u16; 15] {
     anchors
 }
 
-fn calculate_cross_check_sets(lexicon: &Lexicon, board: &Board) -> [[u32; 15]; 15] {
+fn calculate_cross_check_sets_and_value_set(
+    lexicon: &Lexicon,
+    board: &Board,
+) -> ([[u32; 15]; 15], [[u16; 15]; 15]) {
     let mut cross_check_sets = [[67108863; 15]; 15];
+    let mut value_set = [[0; 15]; 15];
 
     for (column_index, column) in board.secondary.iter().enumerate() {
         for (row_index, letter) in column.iter().enumerate() {
             if letter != &0 {
                 if row_index > 0 && column[row_index - 1] == 0 {
-                    cross_check_sets[row_index - 1][column_index] =
-                        calculate_letter_set(lexicon, column, row_index - 1);
+                    (
+                        cross_check_sets[row_index - 1][column_index],
+                        value_set[row_index - 1][column_index],
+                    ) = calculate_letter_set_and_score(lexicon, column, row_index - 1);
                 }
                 if row_index < 14 && column[row_index + 1] == 0 {
-                    cross_check_sets[row_index + 1][column_index] =
-                        calculate_letter_set(lexicon, column, row_index + 1);
+                    (
+                        cross_check_sets[row_index + 1][column_index],
+                        value_set[row_index + 1][column_index],
+                    ) = calculate_letter_set_and_score(lexicon, column, row_index + 1);
                 }
             }
         }
     }
 
-    cross_check_sets
+    (cross_check_sets, value_set)
 }
 
-fn calculate_letter_set(lexicon: &Lexicon, column: &[Letter; 15], anchor_row_index: usize) -> u32 {
+fn calculate_letter_set_and_score(
+    lexicon: &Lexicon,
+    column: &[Letter; 15],
+    anchor_row_index: usize,
+) -> (u32, u16) {
     let mut letter_set = 0;
     let mut current_row_index = anchor_row_index;
     let mut prefix = String::new();
@@ -131,13 +148,16 @@ fn calculate_letter_set(lexicon: &Lexicon, column: &[Letter; 15], anchor_row_ind
             }
         }
     }
+    let full_word = format!("{} {}", prefix, suffix);
+    let score = word_value(&full_word);
 
-    letter_set
+    (letter_set, score)
 }
 
 fn extend_right(
     board: &Board,
     cross_check_sets: &[[u32; 15]; 15],
+    value_set: &[[u16; 15]; 15],
     legal_moves: &mut Vec<LegalMove>,
     row_index: usize,
     column_index: usize,
@@ -148,13 +168,15 @@ fn extend_right(
 ) {
     let current_column_index = column_index + partial_word.len();
     if current_column_index >= 15 {
-        if node.is_terminal {
+        if node.is_terminal && possible {
             legal_moves.push(LegalMove::new(
                 board,
+                value_set,
                 row_index,
                 column_index,
                 board.across.clone(),
                 partial_word.clone(),
+                rack.is_empty(),
             ));
         }
     } else {
@@ -163,10 +185,12 @@ fn extend_right(
             if node.is_terminal && possible {
                 legal_moves.push(LegalMove::new(
                     board,
+                    value_set,
                     row_index,
                     column_index,
                     board.across.clone(),
                     partial_word.clone(),
+                    rack.is_empty(),
                 ));
             }
             for (letter, current_node) in node.children.iter() {
@@ -178,6 +202,7 @@ fn extend_right(
                     extend_right(
                         board,
                         cross_check_sets,
+                        value_set,
                         legal_moves,
                         row_index,
                         column_index,
@@ -196,6 +221,7 @@ fn extend_right(
                 extend_right(
                     board,
                     cross_check_sets,
+                    value_set,
                     legal_moves,
                     row_index,
                     column_index,
@@ -213,6 +239,7 @@ fn extend_right(
 fn left_part(
     board: &Board,
     cross_check_sets: &[[u32; 15]; 15],
+    value_set: &[[u16; 15]; 15],
     legal_moves: &mut Vec<LegalMove>,
     row_index: usize,
     column_index: usize,
@@ -224,6 +251,7 @@ fn left_part(
     extend_right(
         board,
         cross_check_sets,
+        value_set,
         legal_moves,
         row_index,
         column_index,
@@ -240,6 +268,7 @@ fn left_part(
                 left_part(
                     board,
                     cross_check_sets,
+                    value_set,
                     legal_moves,
                     row_index,
                     column_index - 1,
@@ -261,8 +290,11 @@ pub fn calculate_legal_moves(
     rack: &mut HashMap<Letter, u8>,
 ) -> Vec<LegalMove> {
     let mut legal_moves = Vec::new();
-    let anchors = calculate_anchors(board);
-    let cross_check_sets = calculate_cross_check_sets(lexicon, board);
+    let mut anchors = calculate_anchors(board);
+    if anchors[7] == 0 {
+        anchors[7] = 128;
+    }
+    let (cross_check_sets, value_set) = calculate_cross_check_sets_and_value_set(lexicon, board);
     for (row_index, row) in board.primary.iter().enumerate() {
         let mut non_anchor_square_count: u8 = 0;
         let mut partial_word = String::new();
@@ -274,6 +306,7 @@ pub fn calculate_legal_moves(
                         left_part(
                             board,
                             &cross_check_sets,
+                            &value_set,
                             &mut legal_moves,
                             row_index,
                             column_index,
@@ -282,6 +315,23 @@ pub fn calculate_legal_moves(
                             &mut partial_word,
                             non_anchor_square_count,
                         );
+                    } else {
+                        let current_node = lexicon.root.get_node(&partial_word);
+                        if let Some(current_node) = current_node {
+                            extend_right(
+                                board,
+                                &cross_check_sets,
+                                &value_set,
+                                &mut legal_moves,
+                                row_index,
+                                column_index - partial_word.len(),
+                                &current_node,
+                                rack,
+                                &mut partial_word,
+                                false,
+                            );
+                        }
+                        partial_word.clear();
                     }
                     non_anchor_square_count = 0;
                 }
