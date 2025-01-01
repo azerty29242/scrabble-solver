@@ -1,5 +1,6 @@
 use crate::letter::{FromChar, Letter, ToChar};
 use std::fmt::Display;
+use crate::score::PREMIUM_SQUARES;
 
 pub struct Board {
     pub primary: [[Letter; 15]; 15],
@@ -44,8 +45,20 @@ impl Display for Board {
         writeln!(f, "{TOP_BORDER}")?;
         for (row_index, row) in self.primary.iter().enumerate() {
             write!(f, "│")?;
-            for &cell in row {
-                write!(f, " {} │", cell.to_char())?;
+            for (column_index, cell) in row.iter().enumerate() {
+                let prefix = match PREMIUM_SQUARES[row_index][column_index] {
+                    0 => "",
+                    1 => "\x1b[106m",
+                    2 => "\x1b[104m",
+                    3 => "\x1b[105m",
+                    4 => "\x1b[101m",
+                    _ => "",
+                };
+                let suffix = match PREMIUM_SQUARES[row_index][column_index] {
+                    1..=4 => "\x1b[0m",
+                    _ => "",
+                };
+                write!(f, "{} {} {}│", prefix, cell.to_char(), suffix)?;
             }
             writeln!(f)?;
             if row_index < self.primary.len() - 1 {

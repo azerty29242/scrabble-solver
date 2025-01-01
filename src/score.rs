@@ -5,7 +5,7 @@ const LETTERS_VALUES: [u16; 27] = [
     0, 1, 3, 3, 2, 1, 4, 2, 4, 1, 8, 10, 1, 2, 1, 1, 3, 8, 1, 1, 1, 1, 4, 10, 10, 10, 10,
 ];
 
-const PREMIUM_SQUARES: [[u8; 15]; 15] = [
+pub const PREMIUM_SQUARES: [[u8; 15]; 15] = [
     [4, 0, 0, 1, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 4],
     [0, 3, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 3, 0],
     [0, 0, 3, 0, 0, 0, 1, 0, 1, 0, 0, 0, 3, 0, 0],
@@ -56,14 +56,14 @@ pub fn calculate_score(
     board: &Board,
     value_set: &[[u16; 15]; 15],
     letters: &str,
-    mut row_index: usize,
+    row_index: usize,
     mut column_index: usize,
     bingo: bool,
 ) -> u16 {
     let mut score = 0;
     let mut bonus_score = 0;
     let mut coefficient = 1;
-    for (index, letter) in letters.chars().enumerate() {
+    for letter in letters.chars() {
         let mut letter_value = LETTERS_VALUES[Letter::from_char(letter) as usize];
         let mut bonus_coefficient = 1;
         if board.primary[row_index][column_index] == 0 {
